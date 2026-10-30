@@ -1,5 +1,49 @@
 const en = {
   translation: {
+    authMethods: {
+      title: 'Login methods',
+      local: 'Password login',
+      localHelp:
+        'To turn off password login, save OIDC settings first, then sign in with OIDC as an administrator. To change providers later, turn password login back on first.',
+      mcp: 'MCP API-key authentication',
+      mcpHelp:
+        'Controls external MCP clients. Internal device services and SSH have separate settings.',
+      oidc: 'OpenID Connect (OIDC)',
+      displayName: 'Login button name',
+      issuer: 'Issuer URL',
+      clientId: 'Client ID',
+      clientSecret: 'Client secret',
+      secretHelp:
+        'Leave blank to keep the saved secret. The secret is never sent back to the browser.',
+      secretSaved: 'Secret saved',
+      secretOptional: 'Optional for a public client',
+      clearSecret: 'Remove the saved secret (public client)',
+      redirectUrl: 'Redirect URL',
+      redirectHelp:
+        'Use the public HTTPS device URL followed by /api/auth/oidc/callback. Register this exact URL in Keycloak.',
+      scopes: 'Scopes',
+      scopesHelp: 'openid is always included. Offline access is not requested.',
+      setup: 'Keycloak setup',
+      setupHelp:
+        'Create an OpenID Connect client with Standard flow enabled and PKCE S256. For a confidential client, enable client authentication and enter its secret. Use the realm URL as the issuer. HTTPS is required except on loopback.',
+      bindings: 'Linked identities',
+      bindingsHelp:
+        'Create device accounts above, then link each Keycloak user ID (the sub claim) to an account. Only linked identities can sign in; their device account controls roles and permissions. Usernames and email addresses are never matched automatically.',
+      subject: 'Keycloak user ID / OIDC subject',
+      account: 'Device account',
+      addBinding: 'Link an identity',
+      remove: 'Remove link',
+      sessionsHelp:
+        'Saving signs out other browser sessions and cancels pending OIDC logins. Your session stays signed in when its login method and identity remain valid. OIDC sessions expire with the ID token. Sign out ends the device session; your Keycloak session stays active.',
+      save: 'Save login settings',
+      saved: 'Login settings saved',
+      saveError: 'Could not save login settings.',
+      loadError: 'Could not load login settings. Refresh to try again.',
+      loginError:
+        'OIDC sign-in failed or was cancelled. Retry, or ask an administrator to check the provider settings and identity link.',
+      or: 'or',
+      signIn: 'Sign in with {{provider}}'
+    },
     head: {
       desktop: 'Remote Desktop',
       login: 'Login',

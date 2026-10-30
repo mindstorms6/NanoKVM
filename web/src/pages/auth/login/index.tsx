@@ -1,11 +1,12 @@
 import { ReactElement, useEffect, useState } from 'react';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
-import { Button, Form, Input } from 'antd';
+import { Alert, Button, Divider, Form, Input, Spin } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import * as api from '@/api/auth.ts';
 import { encrypt } from '@/lib/encrypt.ts';
+import { getBaseUrl } from '@/lib/service.ts';
 import { Head } from '@/components/head.tsx';
 
 import { Tips } from './tips.tsx';
@@ -13,9 +14,22 @@ import { Tips } from './tips.tsx';
 export const Login = (): ReactElement => {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
+  const [methods, setMethods] = useState<api.LoginMethods | null>(null);
+  const [methodsError, setMethodsError] = useState(false);
 
   const [isLoading, setIsloading] = useState(false);
   const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    api
+      .getLoginMethods()
+      .then((rsp) => {
+        if (rsp.code !== 0) throw new Error('login methods unavailable');
+        setMethods(rsp.data);
+      })
+      .catch(() => setMethodsError(true));
+  }, []);
 
   useEffect(() => {
     api
@@ -89,35 +103,59 @@ export const Login = (): ReactElement => {
               }}
             />
           </div>
-          <Form.Item
-            name="username"
-            rules={[{ required: true, message: t('auth.noEmptyUsername'), min: 1 }]}
-          >
-            <Input prefix={<UserOutlined />} placeholder={t('auth.placeholderUsername')} />
-          </Form.Item>
+          {!methods && !methodsError && (
+            <div className="flex justify-center p-4">
+              <Spin />
+            </div>
+          )}
+          {methodsError && <Alert type="error" showIcon message={t('authMethods.loadError')} />}
+          {searchParams.has('oidcError') && (
+            <Alert className="mb-4" type="error" showIcon message={t('authMethods.loginError')} />
+          )}
+          {methods?.localEnabled && (
+            <>
+              <Form.Item
+                name="username"
+                rules={[{ required: true, message: t('auth.noEmptyUsername'), min: 1 }]}
+              >
+                <Input prefix={<UserOutlined />} placeholder={t('auth.placeholderUsername')} />
+              </Form.Item>
 
-          <Form.Item
-            name="password"
-            rules={[{ required: true, message: t('auth.noEmptyPassword'), min: 1 }]}
-          >
-            <Input
-              prefix={<LockOutlined />}
-              type="password"
-              placeholder={t('auth.placeholderPassword')}
-            />
-          </Form.Item>
+              <Form.Item
+                name="password"
+                rules={[{ required: true, message: t('auth.noEmptyPassword'), min: 1 }]}
+              >
+                <Input
+                  prefix={<LockOutlined />}
+                  type="password"
+                  placeholder={t('auth.placeholderPassword')}
+                />
+              </Form.Item>
 
-          <div className="pb-1 text-red-500">{msg}</div>
+              <div className="pb-1 text-red-500">{msg}</div>
 
-          <Form.Item>
-            <Button type="primary" htmlType="submit" className="w-full" loading={isLoading}>
-              {t('auth.loginButtonText')}
+              <Form.Item>
+                <Button type="primary" htmlType="submit" className="w-full" loading={isLoading}>
+                  {t('auth.loginButtonText')}
+                </Button>
+              </Form.Item>
+
+              <div className="flex justify-end pb-4 text-sm">
+                <Tips />
+              </div>
+            </>
+          )}
+          {methods?.localEnabled && methods.oidcEnabled && <Divider>{t('authMethods.or')}</Divider>}
+          {methods?.oidcEnabled && (
+            <Button
+              block
+              onClick={() => {
+                window.location.assign(`${getBaseUrl('http')}/api/auth/oidc/login`);
+              }}
+            >
+              {t('authMethods.signIn', { provider: methods.oidcDisplayName || 'OpenID Connect' })}
             </Button>
-          </Form.Item>
-
-          <div className="flex justify-end pb-4 text-sm">
-            <Tips />
-          </div>
+          )}
         </Form>
       </div>
     </>

@@ -3,6 +3,7 @@ module NanoKVM-Server
 go 1.25.0
 
 require (
+	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/creack/pty v1.1.24
 	github.com/gin-gonic/contrib v0.0.0-20240508051311-c1c6bf0061b0
 	github.com/gin-gonic/gin v1.10.0
@@ -22,6 +23,7 @@ require (
 	github.com/spf13/viper v1.19.0
 	github.com/unrolled/secure v1.15.0
 	golang.org/x/crypto v0.45.0
+	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sys v0.41.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -34,6 +36,7 @@ require (
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
@@ -79,7 +82,6 @@ require (
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9 // indirect
 	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	google.golang.org/protobuf v1.34.1 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect

@@ -12,6 +12,9 @@ func authRouter(r *gin.Engine) {
 	service := auth.NewService()
 
 	r.POST("/api/auth/login", service.Login) // login
+	r.GET("/api/auth/methods", service.LoginMethods)
+	r.GET("/api/auth/oidc/login", service.OIDCLogin)
+	r.GET(authn.OIDCCallbackPath, service.OIDCCallback)
 
 	api := r.Group("/api").Use(middleware.CheckToken())
 
@@ -25,6 +28,8 @@ func authRouter(r *gin.Engine) {
 		middleware.RequireRole(authn.RoleAdmin),
 	)
 	admin.GET("/auth/permissions", service.ListPermissions)
+	admin.GET("/auth/settings", service.GetSettings)
+	admin.PUT("/auth/settings", service.SetSettings)
 	admin.GET("/auth/users", service.ListUsers)
 	admin.POST("/auth/users", service.CreateUser)
 	admin.PUT("/auth/users/:username", service.UpdateUser)

@@ -10,6 +10,7 @@ function toAccount(data: any): Account {
   return {
     username: data.username,
     role: data.role === 'admin' ? 'admin' : 'user',
+    authMethod: data.authMethod === 'oidc' ? 'oidc' : 'local',
     permissions: Array.isArray(data.permissions) ? data.permissions : []
   };
 }
@@ -40,6 +41,7 @@ export const ProtectedRoute = ({ children }: { children: ReactNode }) => {
             previous &&
             previous.username === next.username &&
             previous.role === next.role &&
+            previous.authMethod === next.authMethod &&
             previous.permissions.join() === next.permissions.join()
           ) {
             return previous;

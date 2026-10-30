@@ -1,9 +1,51 @@
 import { http, HttpResponse } from 'msw';
 import { setupWorker } from 'msw/browser';
 
+import type { AuthenticationSettings } from '@/api/auth';
+
 let isLoggedIn = false;
+let authentication: AuthenticationSettings = {
+  revision: '',
+  localEnabled: true,
+  mcpKeyEnabled: true,
+  oidc: {
+    enabled: false,
+    displayName: 'Keycloak',
+    issuer: '',
+    clientId: '',
+    redirectUrl: '',
+    scopes: ['openid', 'profile', 'email'],
+    bindings: []
+  }
+};
 
 export const handlers = [
+  http.get('/api/auth/methods', () =>
+    HttpResponse.json({
+      code: 0,
+      data: {
+        localEnabled: authentication.localEnabled,
+        oidcEnabled: authentication.oidc.enabled,
+        oidcDisplayName: authentication.oidc.displayName,
+        authenticationDisabled: false
+      }
+    })
+  ),
+  http.get('/api/auth/settings', () =>
+    HttpResponse.json({
+      code: 0,
+      data: { settings: authentication, clientSecretConfigured: false }
+    })
+  ),
+  http.put('/api/auth/settings', async ({ request }) => {
+    authentication = (await request.json()) as AuthenticationSettings;
+    authentication.revision = crypto.randomUUID();
+    authentication.oidc.clientSecret = '';
+    return HttpResponse.json({
+      code: 0,
+      data: { settings: authentication, clientSecretConfigured: false }
+    });
+  }),
   http.post('/api/auth/login', () => {
     isLoggedIn = true;
     return HttpResponse.json({

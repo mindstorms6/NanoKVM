@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"NanoKVM-Server/authn"
 	"NanoKVM-Server/service/controlmode"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,11 @@ func APIKeyMiddleware(control *controlmode.Manager) gin.HandlerFunc {
 		control = controlmode.GetManager()
 	}
 	return func(c *gin.Context) {
+		settings, err := authn.DefaultSettings.Get()
+		if err != nil || !settings.MCPKeyEnabled {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "MCP API-key authentication is disabled or unavailable"})
+			return
+		}
 		if err := control.Require(controlmode.ModeMCP); err != nil {
 			c.JSON(http.StatusForbidden, gin.H{"error": "MCP service is disabled"})
 			c.Abort()

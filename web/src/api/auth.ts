@@ -42,7 +42,50 @@ export type Account = {
   role: UserRole;
   // The effective grants: the stored set plus everything it implies.
   permissions: Permission[];
+  authMethod?: 'local' | 'oidc';
 };
+
+export type LoginMethods = {
+  localEnabled: boolean;
+  oidcEnabled: boolean;
+  oidcDisplayName: string;
+  authenticationDisabled: boolean;
+};
+
+export type AuthenticationSettings = {
+  revision: string;
+  localEnabled: boolean;
+  mcpKeyEnabled: boolean;
+  oidc: {
+    enabled: boolean;
+    displayName: string;
+    issuer: string;
+    clientId: string;
+    clientSecret?: string;
+    redirectUrl: string;
+    scopes: string[];
+    bindings: { subject: string; username: string }[];
+  };
+};
+
+export function getLoginMethods() {
+  return http.get('/api/auth/methods');
+}
+
+export function getAuthenticationSettings() {
+  return http.get('/api/auth/settings');
+}
+
+export function saveAuthenticationSettings(
+  settings: AuthenticationSettings,
+  clearClientSecret = false
+) {
+  return http.request({
+    method: 'put',
+    url: '/api/auth/settings',
+    data: { ...settings, clearClientSecret }
+  });
+}
 
 export type User = Account & {
   enabled: boolean;

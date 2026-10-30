@@ -3,6 +3,7 @@ import { Button, Divider } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
+import { Authentication } from './authentication.tsx';
 import { Logout } from './logout.tsx';
 import { Users } from './users.tsx';
 
@@ -31,12 +32,14 @@ export const Account = () => {
           <span>{t(`settings.account.roles.${account.role}`)}</span>
         </div>
 
-        <div className="flex items-center justify-between">
-          <span>{t('settings.account.password')}</span>
-          <Button type="primary" onClick={changePassword}>
-            {t('settings.account.updateBtn')}
-          </Button>
-        </div>
+        {account.authMethod !== 'oidc' && (
+          <div className="flex items-center justify-between">
+            <span>{t('settings.account.password')}</span>
+            <Button type="primary" onClick={changePassword}>
+              {t('settings.account.updateBtn')}
+            </Button>
+          </div>
+        )}
       </div>
 
       <Divider className="opacity-50" />
@@ -44,6 +47,8 @@ export const Account = () => {
       {account.role === 'admin' && (
         <>
           <Users />
+          <Divider className="opacity-50" />
+          <Authentication />
           <Divider className="opacity-50" />
         </>
       )}

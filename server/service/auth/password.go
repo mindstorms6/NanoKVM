@@ -21,6 +21,11 @@ var systemPasswordUpdater = changeRootPassword
 func (s *Service) ChangePassword(c *gin.Context) {
 	var req proto.ChangePasswordReq
 	var rsp proto.Response
+	settings, err := authn.DefaultSettings.Get()
+	if err != nil || !settings.LocalEnabled {
+		rsp.ErrRsp(c, -1, "password login is disabled or unavailable")
+		return
+	}
 	if err := proto.ParseFormRequest(c, &req); err != nil {
 		rsp.ErrRsp(c, -1, "invalid parameters")
 		return
@@ -69,7 +74,7 @@ func (s *Service) IsPasswordUpdated(c *gin.Context) {
 		rsp.ErrRsp(c, -2, "failed to get password state")
 		return
 	}
-	rsp.OkRspWithData(c, &proto.IsPasswordUpdatedRsp{IsUpdated: !user.MustChangePassword})
+	rsp.OkRspWithData(c, &proto.IsPasswordUpdatedRsp{IsUpdated: principal.AuthMethod == authn.MethodOIDC || !user.MustChangePassword})
 }
 
 func changeUserPassword(username, encryptedPassword string) error {

@@ -9,6 +9,7 @@ type GetAccountRsp struct {
 	Username    string   `json:"username"`
 	Role        string   `json:"role"`
 	Permissions []string `json:"permissions"`
+	AuthMethod  string   `json:"authMethod,omitempty"`
 }
 
 type ChangePasswordReq struct {

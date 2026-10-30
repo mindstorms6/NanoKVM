@@ -25,6 +25,8 @@ type Principal struct {
 	Username    string
 	Role        authn.Role
 	Permissions []authn.Permission
+	AuthMethod  string
+	OIDCSubject string
 }
 
 // Has reports whether the principal effectively holds the permission.
@@ -39,6 +41,9 @@ func (p Principal) Has(permission authn.Permission) bool {
 type Token struct {
 	Username     string `json:"username"`
 	TokenVersion uint64 `json:"tokenVersion"`
+	AuthMethod   string `json:"authMethod,omitempty"`
+	AuthRevision string `json:"authRevision,omitempty"`
+	OIDCSubject  string `json:"oidcSubject,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -74,7 +79,7 @@ func CheckToken() gin.HandlerFunc {
 		// up any earlier one. Only the long-lived channels are dropped by a grant
 		// edit, so a short request keeps the principal it was authorized with.
 		if channel != "" {
-			user, err := authn.DefaultStore.ValidateToken(principal.Username, token.TokenVersion)
+			user, err := validateSession(token)
 			if err != nil {
 				unregister()
 				cancel()
@@ -87,7 +92,7 @@ func CheckToken() gin.HandlerFunc {
 		}
 
 		timer := time.AfterFunc(time.Until(token.ExpiresAt.Time), cancel)
-		go watchSessionState(requestContext, cancel, principal.Username, token.TokenVersion, sessionRecheckDelay)
+		go watchTokenState(requestContext, cancel, token, sessionRecheckDelay)
 		defer func() {
 			timer.Stop()
 			unregister()
@@ -98,7 +103,7 @@ func CheckToken() gin.HandlerFunc {
 	}
 }
 
-func watchSessionState(ctx context.Context, cancel context.CancelFunc, username string, tokenVersion uint64, interval time.Duration) {
+func watchTokenState(ctx context.Context, cancel context.CancelFunc, token *Token, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -106,12 +111,23 @@ func watchSessionState(ctx context.Context, cancel context.CancelFunc, username 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if _, err := authn.DefaultStore.ValidateToken(username, tokenVersion); err != nil {
+			if _, err := validateSession(token); err != nil {
 				cancel()
 				return
 			}
 		}
 	}
+}
+
+func validateSession(token *Token) (*authn.User, error) {
+	settings, err := authn.DefaultSettings.Get()
+	if err != nil {
+		return nil, err
+	}
+	if !settings.AllowsSession(token.AuthMethod, token.AuthRevision, token.OIDCSubject, token.Username) {
+		return nil, errors.New("login method disabled or authentication settings changed")
+	}
+	return authn.DefaultStore.ValidateToken(token.Username, token.TokenVersion)
 }
 
 func RequireRole(roles ...authn.Role) gin.HandlerFunc {
@@ -166,6 +182,12 @@ func CurrentPrincipal(c *gin.Context) (Principal, bool) {
 	return principal, ok
 }
 
+func CurrentToken(c *gin.Context) *Token {
+	value, _ := c.Get(tokenContextKey)
+	token, _ := value.(*Token)
+	return token
+}
+
 func CheckLoopbackInternalToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if allowByLoopbackInternalToken(c.Request) {
@@ -208,7 +230,7 @@ func authenticate(c *gin.Context) (Principal, *Token, bool) {
 	if err != nil {
 		return Principal{}, nil, false
 	}
-	user, err := authn.DefaultStore.ValidateToken(token.Username, token.TokenVersion)
+	user, err := validateSession(token)
 	if err != nil {
 		log.Debugf("validate session for %q: %s", token.Username, err)
 		return Principal{}, nil, false
@@ -217,6 +239,8 @@ func authenticate(c *gin.Context) (Principal, *Token, bool) {
 		Username:    user.Username,
 		Role:        user.Role,
 		Permissions: authn.EffectivePermissions(user),
+		AuthMethod:  token.AuthMethod,
+		OIDCSubject: token.OIDCSubject,
 	}, token, true
 }
 
@@ -231,16 +255,32 @@ func abortForbidden(c *gin.Context) {
 }
 
 func GenerateJWT(username string, tokenVersion uint64) (string, error) {
+	settings, err := authn.DefaultSettings.Get()
+	if err != nil {
+		return "", err
+	}
+	return GenerateSessionJWT(username, tokenVersion, authn.MethodLocal, settings.Revision, "", time.Time{})
+}
+
+// OIDC sessions never outlive the verified ID token. Provider access and refresh
+// tokens are not kept or exposed to the browser.
+func GenerateSessionJWT(username string, tokenVersion uint64, method, revision, subject string, expires time.Time) (string, error) {
 	conf := config.GetInstance()
 	now := time.Now()
 	expireDuration := time.Duration(conf.JWT.RefreshTokenDuration) * time.Second
+	if expires.IsZero() || expires.After(now.Add(expireDuration)) {
+		expires = now.Add(expireDuration)
+	}
 	claims := Token{
 		Username:     username,
 		TokenVersion: tokenVersion,
+		AuthMethod:   method,
+		AuthRevision: revision,
+		OIDCSubject:  subject,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   username,
 			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(expireDuration)),
+			ExpiresAt: jwt.NewNumericDate(expires),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

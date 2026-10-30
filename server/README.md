@@ -163,6 +163,79 @@ Creating a regular account without naming a grant set keeps that same meaning, s
 knows about roles gets the account the user role used to create; the account editor seeds a new
 regular account with `console.view` only, and an explicitly empty set really is empty.
 
+## OpenID Connect / Keycloak
+
+Administrators configure **Settings > Account > Login methods**. Password login,
+OpenID Connect, and external MCP API-key authentication have independent switches.
+Existing installations keep password and MCP-key authentication enabled and OIDC
+disabled until configured. The `authentication: enable` setting in `server.yaml`
+must remain enabled; `disable` still bypasses browser authentication entirely.
+
+To configure Keycloak:
+
+1. Create an **OpenID Connect** client in the intended realm. Enable **Standard
+   flow** (authorization code) and set **PKCE Code Challenge Method** to **S256**.
+   Disable implicit flow and direct access grants. A confidential client with
+   **Client authentication** enabled is recommended; public clients also work.
+2. Add the exact valid redirect URI, for example
+   `https://kvm.example.com/api/auth/oidc/callback`. Use the externally visible
+   HTTPS device origin. Keep the browser UI and callback on the same origin;
+   preserve the public host and HTTPS scheme through a trusted reverse proxy.
+3. In NanoKVM, enable OIDC, enter a button name, the realm issuer URL (for example
+   `https://sso.example.com/realms/home`), the client ID, the client secret for a
+   confidential client, and the redirect URI. The realm URL is the issuer, **not**
+   its `.well-known/openid-configuration` endpoint. The server discovers the
+   authorization, token and signing-key endpoints as described in the
+   [Keycloak OIDC documentation](https://www.keycloak.org/securing-apps/oidc-layers).
+   HTTPS with a trusted certificate is required; HTTP is allowed only on loopback
+   for local development. Install private CA certificates into the device's
+   system trust store when needed; TLS verification cannot be disabled.
+4. Create the desired device accounts with their roles and permissions in the
+   account manager. Add an identity link from each Keycloak **user ID** (the ID
+   token's immutable `sub` claim) to its device account. Keycloak shows the ID on
+   the user's details page. Link an enabled administrator before using OIDC only.
+   Every unlinked identity is rejected, including realm administrators. There is
+   no automatic email/username matching, registration, or mapping of realm roles
+   to device administrators. Link more than one subject to the same account only
+   when sharing that account's permissions and session revocation is intended.
+5. Save, sign out, and sign in through the new OIDC button. After signing in as a
+   linked administrator, password login can be switched off. The server requires
+   a working OIDC administrator session with the same provider and links before
+   allowing this; both browser methods cannot be disabled together. To change a
+   provider or its links while using OIDC only, first re-enable password login,
+   save the provider changes, and verify a new OIDC administrator login.
+
+OIDC uses the authorization-code flow with PKCE S256, a browser-bound single-use
+state, and a nonce. ID tokens are verified against the provider's signing keys,
+issuer, audience, and expiry. Provider access/refresh tokens never reach the web
+app and are not persisted. The device issues its own HttpOnly session cookie,
+expires it no later than the ID token, and checks the current device account and
+permissions on each request. Resetting, disabling, or deleting a device account
+invalidates its federated sessions too. Keycloak user/role changes are observed
+at the next OIDC login; this implementation does not support back-channel logout
+or continuously introspect Keycloak sessions. Signing out ends the device
+session according to `revokeTokensOnLogout`; it leaves the Keycloak SSO session
+active, so signing in again may not prompt for credentials.
+
+Saving login settings invalidates previous browser sessions and pending OIDC
+flows. The saving administrator receives a replacement session if their method
+and identity remain valid; changing their OIDC provider or links requires signing
+in again. MCP keys are controlled separately by their switch and existing MCP
+service mode. SSH and the internal AI/loopback interface retain their own controls.
+
+Login settings are stored atomically in `/etc/kvm/authentication.json` with mode
+`0600`; the client secret is never returned by the settings API. A blank secret
+field preserves the saved secret, and an explicit **Remove the saved secret**
+switch clears it for a public client. Include this file in device backups.
+
+For recovery from an unavailable provider, use an existing authorized SSH/root
+session or physical access to move `/etc/kvm/authentication.json` aside and
+restart NanoKVM. This restores password and MCP-key method defaults without
+changing account passwords; restore the old file to recover the OIDC settings.
+The physical BOOT-button password reset still changes `/etc/kvm/pwd` and the
+system password, but does **not** re-enable a disabled password login method.
+Do not set `authentication: disable` to recover an internet-accessible device.
+
 ## Compile & Deploy
 
 Note: The manual steps below require a Linux x86-64 host with Go 1.25 or newer; they are not compatible with ARM, Windows or macOS. With Docker you can skip them entirely and use the containerized flow instead — the root [Makefile](../Makefile) (`make shell`) or the dev container (see "Development" in the root [README](../README.md)) — which works on any host OS; run `server/build.sh` inside the container for a release-equivalent build.

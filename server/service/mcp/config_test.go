@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"NanoKVM-Server/authn"
 	"NanoKVM-Server/service/controlmode"
 
 	"github.com/gin-gonic/gin"
@@ -19,8 +20,10 @@ func useTestConfig(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "mcp.json")
 	oldPath := configFilePath
+	oldSettings := authn.DefaultSettings
+	authn.DefaultSettings = authn.NewSettingsStore(filepath.Join(t.TempDir(), "authentication.json"))
 	configFilePath = path
-	t.Cleanup(func() { configFilePath = oldPath })
+	t.Cleanup(func() { configFilePath = oldPath; authn.DefaultSettings = oldSettings })
 	return path
 }
 

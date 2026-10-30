@@ -137,7 +137,7 @@ func TestAccountFileResetCancelsActiveSession(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go watchSessionState(ctx, cancel, user.Username, user.TokenVersion, 10*time.Millisecond)
+	go watchTokenState(ctx, cancel, &Token{Username: user.Username, TokenVersion: user.TokenVersion}, 10*time.Millisecond)
 	if err = os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
@@ -213,6 +213,8 @@ func requestWithToken(handler http.Handler, path, token string) int {
 func useTestAuthStore(t *testing.T, store *authn.Store) func() {
 	t.Helper()
 	originalStore := authn.DefaultStore
+	originalSettings := authn.DefaultSettings
+	authn.DefaultSettings = authn.NewSettingsStore(filepath.Join(t.TempDir(), "authentication.json"))
 	conf := config.GetInstance()
 	originalAuthentication := conf.Authentication
 	originalSecret := conf.JWT.SecretKey
@@ -223,6 +225,7 @@ func useTestAuthStore(t *testing.T, store *authn.Store) func() {
 	conf.JWT.RefreshTokenDuration = 3600
 	return func() {
 		authn.DefaultStore = originalStore
+		authn.DefaultSettings = originalSettings
 		conf.Authentication = originalAuthentication
 		conf.JWT.SecretKey = originalSecret
 		conf.JWT.RefreshTokenDuration = originalDuration

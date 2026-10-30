@@ -26,6 +26,15 @@ func (s *Service) Login(c *gin.Context) {
 	}
 
 	clientIP := GetClientIP(c)
+	settings, err := authn.DefaultSettings.Get()
+	if err != nil {
+		rsp.ErrRsp(c, -3, "authentication unavailable")
+		return
+	}
+	if !settings.LocalEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": -6, "msg": "password login is disabled"})
+		return
+	}
 	if locked, code, msg := CheckLoginAttempt(clientIP); locked {
 		time.Sleep(3 * time.Second)
 		rsp.ErrRsp(c, code, msg)
@@ -54,7 +63,7 @@ func (s *Service) Login(c *gin.Context) {
 	}
 
 	ClearLoginAttempt(clientIP)
-	token, err := middleware.GenerateJWT(user.Username, user.TokenVersion)
+	token, err := middleware.GenerateSessionJWT(user.Username, user.TokenVersion, authn.MethodLocal, settings.Revision, "", time.Time{})
 	if err != nil {
 		time.Sleep(time.Second)
 		rsp.ErrRsp(c, -3, "generate token failed")
@@ -101,6 +110,7 @@ func (s *Service) GetAccount(c *gin.Context) {
 		Username:    principal.Username,
 		Role:        string(principal.Role),
 		Permissions: permissionStrings(principal.Permissions),
+		AuthMethod:  principal.AuthMethod,
 	})
 }
 
