@@ -43,6 +43,7 @@ export type Account = {
   // The effective grants: the stored set plus everything it implies.
   permissions: Permission[];
   authMethod?: 'local' | 'oidc';
+  localEnabled?: boolean;
 };
 
 export type LoginMethods = {

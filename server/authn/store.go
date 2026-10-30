@@ -2,6 +2,7 @@ package authn
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -42,6 +43,7 @@ var (
 )
 
 type User struct {
+	ID                 string       `json:"id"`
 	Username           string       `json:"username"`
 	PasswordHash       string       `json:"password"`
 	Role               Role         `json:"role"`
@@ -79,14 +81,28 @@ type legacyAccount struct {
 }
 
 type Store struct {
-	path  string
-	mutex sync.RWMutex
+	path          string
+	mutex         sync.RWMutex
+	resetSettings *SettingsStore
 }
 
-var DefaultStore = NewStore(AccountFile)
+var DefaultStore = NewStoreWithRecovery(AccountFile, DefaultSettings)
 
 func NewStore(path string) *Store {
 	return &Store{path: path}
+}
+
+// NewStoreWithRecovery couples physical account-file reset to login recovery.
+// It also covers devices still running the original BOOT-button support binary.
+func NewStoreWithRecovery(path string, settings *SettingsStore) *Store {
+	return &Store{path: path, resetSettings: settings}
+}
+
+func (s *Store) Initialize() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	_, err := s.loadLocked(true)
+	return err
 }
 
 func IsValidRole(role Role) bool {
@@ -109,10 +125,10 @@ func ValidatePassword(password string) error {
 }
 
 func (s *Store) List() ([]UserInfo, error) {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 
-	db, err := s.loadLocked(false)
+	db, err := s.loadLocked(true)
 	if err != nil {
 		return nil, err
 	}
@@ -135,10 +151,10 @@ func (s *Store) List() ([]UserInfo, error) {
 }
 
 func (s *Store) Get(username string) (*User, error) {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 
-	db, err := s.loadLocked(false)
+	db, err := s.loadLocked(true)
 	if err != nil {
 		return nil, err
 	}
@@ -431,6 +447,11 @@ func (s *Store) Revoke(username string) (*User, error) {
 func (s *Store) loadLocked(migrate bool) (*database, error) {
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
+		if s.resetSettings != nil {
+			if err = s.resetSettings.recoverLocalLogin(); err != nil {
+				return nil, err
+			}
+		}
 		db, defaultErr := defaultDatabase()
 		if defaultErr != nil {
 			return nil, defaultErr
@@ -452,6 +473,22 @@ func (s *Store) loadLocked(migrate bool) (*database, error) {
 		materializePermissions(&db)
 		if err = validateDatabase(&db); err != nil {
 			return nil, err
+		}
+		changed, idErr := materializeAccountIDs(&db)
+		if idErr != nil {
+			return nil, idErr
+		}
+		if changed {
+			// Older releases can rewrite the account file without IDs. Treat
+			// that as a new baseline, never as permission to reattach old links.
+			if s.resetSettings != nil {
+				if err = s.resetSettings.recoverLocalLogin(); err != nil {
+					return nil, err
+				}
+			}
+			if err = s.saveLocked(&db); err != nil {
+				return nil, err
+			}
 		}
 		return &db, nil
 	}
@@ -481,6 +518,11 @@ func (s *Store) loadLocked(migrate bool) (*database, error) {
 	}
 	materializePermissions(&db)
 	if migrate {
+		if s.resetSettings != nil {
+			if err = s.resetSettings.recoverLocalLogin(); err != nil {
+				return nil, err
+			}
+		}
 		if err = s.saveLocked(&db); err != nil {
 			return nil, err
 		}
@@ -489,6 +531,9 @@ func (s *Store) loadLocked(migrate bool) (*database, error) {
 }
 
 func (s *Store) saveLocked(db *database) error {
+	if _, err := materializeAccountIDs(db); err != nil {
+		return err
+	}
 	if err := validateDatabase(db); err != nil {
 		return err
 	}
@@ -569,6 +614,24 @@ func newTokenVersion() (uint64, error) {
 			return version, nil
 		}
 	}
+}
+
+// Account IDs identify one lifetime of a local account. Unlike TokenVersion,
+// they survive password changes, logout, grant edits and disable/re-enable.
+func materializeAccountIDs(db *database) (bool, error) {
+	changed := false
+	for i := range db.Users {
+		if db.Users[i].ID != "" {
+			continue
+		}
+		var id [32]byte
+		if _, err := rand.Read(id[:]); err != nil {
+			return false, err
+		}
+		db.Users[i].ID = base64.RawURLEncoding.EncodeToString(id[:])
+		changed = true
+	}
+	return changed, nil
 }
 
 func validateDatabase(db *database) error {

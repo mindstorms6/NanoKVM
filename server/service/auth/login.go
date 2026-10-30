@@ -26,7 +26,7 @@ func (s *Service) Login(c *gin.Context) {
 	}
 
 	clientIP := GetClientIP(c)
-	settings, err := authn.DefaultSettings.Get()
+	settings, err := authn.CurrentSettings()
 	if err != nil {
 		rsp.ErrRsp(c, -3, "authentication unavailable")
 		return
@@ -101,16 +101,26 @@ func (s *Service) Logout(c *gin.Context) {
 
 func (s *Service) GetAccount(c *gin.Context) {
 	var rsp proto.Response
+	localEnabled := true
+	if config.GetInstance().Authentication != "disable" {
+		settings, err := authn.CurrentSettings()
+		if err != nil {
+			rsp.ErrRsp(c, -1, "get account failed")
+			return
+		}
+		localEnabled = settings.LocalEnabled
+	}
 	principal, ok := middleware.CurrentPrincipal(c)
 	if !ok {
 		rsp.ErrRsp(c, -1, "get account failed")
 		return
 	}
 	rsp.OkRspWithData(c, &proto.GetAccountRsp{
-		Username:    principal.Username,
-		Role:        string(principal.Role),
-		Permissions: permissionStrings(principal.Permissions),
-		AuthMethod:  principal.AuthMethod,
+		Username:     principal.Username,
+		Role:         string(principal.Role),
+		Permissions:  permissionStrings(principal.Permissions),
+		AuthMethod:   principal.AuthMethod,
+		LocalEnabled: localEnabled,
 	})
 }
 

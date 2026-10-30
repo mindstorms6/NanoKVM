@@ -7,6 +7,7 @@ type Config struct {
 	Cert           Cert     `yaml:"cert"`
 	Logger         Logger   `yaml:"logger"`
 	Authentication string   `yaml:"authentication"`
+	TrustedProxies []string `yaml:"trustedProxies"`
 	JWT            JWT      `yaml:"jwt"`
 	Stun           string   `yaml:"stun"`
 	Turn           Turn     `yaml:"turn"`

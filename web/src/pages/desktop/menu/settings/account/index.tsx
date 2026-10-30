@@ -32,7 +32,7 @@ export const Account = () => {
           <span>{t(`settings.account.roles.${account.role}`)}</span>
         </div>
 
-        {account.authMethod !== 'oidc' && (
+        {account.localEnabled !== false && (
           <div className="flex items-center justify-between">
             <span>{t('settings.account.password')}</span>
             <Button type="primary" onClick={changePassword}>

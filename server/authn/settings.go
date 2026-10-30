@@ -22,8 +22,9 @@ const (
 // OIDC identities are explicitly linked by the immutable subject, never by a
 // mutable username or email claim. Roles and permissions remain device-owned.
 type OIDCBinding struct {
-	Subject  string `json:"subject"`
-	Username string `json:"username"`
+	Subject   string `json:"subject"`
+	Username  string `json:"username"`
+	AccountID string `json:"accountId"`
 }
 
 type OIDCSettings struct {
@@ -60,9 +61,49 @@ func DefaultAuthSettings() Settings {
 }
 
 func (s *SettingsStore) Get() (Settings, error) {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-	return s.readLocked()
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	settings, err := s.readLocked()
+	if err != nil {
+		return Settings{}, err
+	}
+	for _, binding := range settings.OIDC.Bindings {
+		if binding.AccountID == "" {
+			// Username-only links cannot establish whether an account was
+			// deleted and recreated. Require deliberate relinking after upgrade.
+			settings.OIDC.Bindings = []OIDCBinding{}
+			settings.LocalEnabled = true
+			return s.writeLocked(settings)
+		}
+	}
+	return settings, nil
+}
+
+// CurrentSettings initializes accounts before consulting method switches, so
+// deletion of /etc/kvm/pwd restores local access even on OIDC-only devices.
+func CurrentSettings() (Settings, error) {
+	if err := DefaultStore.Initialize(); err != nil {
+		return Settings{}, err
+	}
+	return DefaultSettings.Get()
+}
+
+func (s *SettingsStore) recoverLocalLogin() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if _, err := os.Stat(s.path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	settings, err := s.readLocked()
+	if err != nil {
+		return err
+	}
+	settings.LocalEnabled = true
+	settings.OIDC.Bindings = []OIDCBinding{}
+	_, err = s.writeLocked(settings)
+	return err
 }
 
 func (s *SettingsStore) readLocked() (Settings, error) {
@@ -104,8 +145,17 @@ func (s *SettingsStore) Save(settings Settings, clearSecret bool) (Settings, err
 	if err = ValidateSettings(settings); err != nil {
 		return Settings{}, err
 	}
+	for _, binding := range settings.OIDC.Bindings {
+		if binding.AccountID == "" {
+			return Settings{}, errors.New("OIDC bindings must identify a local account")
+		}
+	}
+	return s.writeLocked(settings)
+}
+
+func (s *SettingsStore) writeLocked(settings Settings) (Settings, error) {
 	var revision [32]byte
-	if _, err = rand.Read(revision[:]); err != nil {
+	if _, err := rand.Read(revision[:]); err != nil {
 		return Settings{}, err
 	}
 	settings.Revision = base64.RawURLEncoding.EncodeToString(revision[:])
@@ -136,6 +186,14 @@ func (s *SettingsStore) Save(settings Settings, clearSecret bool) (Settings, err
 		return Settings{}, closeErr
 	}
 	if err = os.Rename(file.Name(), s.path); err != nil {
+		return Settings{}, err
+	}
+	directory, err := os.Open(dir)
+	if err != nil {
+		return Settings{}, err
+	}
+	defer directory.Close()
+	if err = directory.Sync(); err != nil {
 		return Settings{}, err
 	}
 	return settings, nil
@@ -194,7 +252,7 @@ func ValidateOIDCURL(raw string, callback bool) error {
 
 // AllowsSession also validates the subject binding on each request, so deleting
 // or disabling a local account continues to revoke its federated sessions.
-func (s Settings) AllowsSession(method, revision, subject, username string) bool {
+func (s Settings) AllowsSession(method, revision, subject, username, accountID string) bool {
 	if revision != s.Revision {
 		return false
 	}
@@ -205,7 +263,7 @@ func (s Settings) AllowsSession(method, revision, subject, username string) bool
 		return false
 	}
 	for _, binding := range s.OIDC.Bindings {
-		if binding.Subject == subject && binding.Username == username {
+		if binding.Subject == subject && binding.Username == username && accountID != "" && binding.AccountID == accountID {
 			return true
 		}
 	}

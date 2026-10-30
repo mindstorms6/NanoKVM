@@ -11,6 +11,7 @@ function toAccount(data: any): Account {
     username: data.username,
     role: data.role === 'admin' ? 'admin' : 'user',
     authMethod: data.authMethod === 'oidc' ? 'oidc' : 'local',
+    localEnabled: data.localEnabled !== false,
     permissions: Array.isArray(data.permissions) ? data.permissions : []
   };
 }
@@ -42,6 +43,7 @@ export const ProtectedRoute = ({ children }: { children: ReactNode }) => {
             previous.username === next.username &&
             previous.role === next.role &&
             previous.authMethod === next.authMethod &&
+            previous.localEnabled === next.localEnabled &&
             previous.permissions.join() === next.permissions.join()
           ) {
             return previous;

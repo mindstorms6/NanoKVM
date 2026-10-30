@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,12 +21,22 @@ import (
 
 const oidcCookieName = "nano-kvm-oidc-state"
 const oidcFlowDuration = 5 * time.Minute
+const oidcMaxFlows = 512
+const oidcMaxFlowsPerSource = 8
+const oidcMaxStartsPerMinute = 20
+const oidcMaxStartSources = 1024
 
 type oidcFlow struct {
 	nonce    string
 	verifier string
 	revision string
 	expires  time.Time
+	source   string
+}
+
+type oidcStartWindow struct {
+	until time.Time
+	count int
 }
 
 var oidcHTTPClient = &http.Client{Timeout: 10 * time.Second}
@@ -77,34 +88,76 @@ func oauthConfig(settings authn.Settings, provider *oidc.Provider) oauth2.Config
 
 func (s *Service) OIDCLogin(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	settings, err := authn.DefaultSettings.Get()
+	settings, err := authn.CurrentSettings()
 	if err != nil || !settings.OIDC.Enabled || config.GetInstance().Authentication == "disable" {
-		s.oidcFailure(c)
-		return
-	}
-	provider, err := s.discoverProvider(settings)
-	if err != nil {
 		s.oidcFailure(c)
 		return
 	}
 	state, nonce, verifier := rand.Text(), rand.Text(), oauth2.GenerateVerifier()
 	now := time.Now()
-	s.mutex.Lock()
-	for key, flow := range s.flows {
-		if !flow.expires.After(now) {
-			delete(s.flows, key)
-		}
+	previous, _ := c.Cookie(oidcCookieName)
+	// Gin only accepts forwarding headers from the explicitly configured
+	// trustedProxies. Normalize equivalent IPv6 spellings to one budget.
+	source := c.ClientIP()
+	if ip := net.ParseIP(source); ip != nil {
+		source = ip.String()
 	}
-	if len(s.flows) >= 512 {
+	if !s.reserveOIDCFlow(state, previous, oidcFlow{nonce: nonce, verifier: verifier, revision: settings.Revision, expires: now.Add(oidcFlowDuration), source: source}, now) {
+		s.oidcFailure(c)
+		return
+	}
+	provider, err := s.discoverProvider(settings)
+	if err != nil {
+		s.mutex.Lock()
+		delete(s.flows, state)
 		s.mutex.Unlock()
 		s.oidcFailure(c)
 		return
 	}
-	s.flows[state] = oidcFlow{nonce: nonce, verifier: verifier, revision: settings.Revision, expires: now.Add(oidcFlowDuration)}
-	s.mutex.Unlock()
 	setOIDCCookie(c, state, int(oidcFlowDuration.Seconds()), settings)
 	oauth := oauthConfig(settings, provider)
 	c.Redirect(http.StatusFound, oauth.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier)))
+}
+
+// Both pending flows and recent-source state are bounded. An existing browser
+// flow is replaced only on admission, so a rejected retry can still complete it.
+func (s *Service) reserveOIDCFlow(state, previous string, flow oidcFlow, now time.Time) bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	pending := 0
+	replace := false
+	for key, existing := range s.flows {
+		if !existing.expires.After(now) {
+			delete(s.flows, key)
+		} else if key == previous && existing.source == flow.source {
+			replace = true
+		} else if existing.source == flow.source {
+			pending++
+		}
+	}
+	for source, window := range s.flowStarts {
+		if !window.until.After(now) {
+			delete(s.flowStarts, source)
+		}
+	}
+	window, known := s.flowStarts[flow.source]
+	total := len(s.flows)
+	if replace {
+		total--
+	}
+	if pending >= oidcMaxFlowsPerSource || total >= oidcMaxFlows || window.count >= oidcMaxStartsPerMinute || (!known && len(s.flowStarts) >= oidcMaxStartSources) {
+		return false
+	}
+	if !known {
+		window.until = now.Add(time.Minute)
+	}
+	window.count++
+	s.flowStarts[flow.source] = window
+	if replace {
+		delete(s.flows, previous)
+	}
+	s.flows[state] = flow
+	return true
 }
 
 func setOIDCCookie(c *gin.Context, state string, maxAge int, settings authn.Settings) {
@@ -118,7 +171,7 @@ func setOIDCCookie(c *gin.Context, state string, maxAge int, settings authn.Sett
 func (s *Service) OIDCCallback(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	c.Header("Referrer-Policy", "no-referrer")
-	settings, err := authn.DefaultSettings.Get()
+	settings, err := authn.CurrentSettings()
 	if err != nil {
 		s.oidcFailure(c)
 		return
@@ -174,16 +227,18 @@ func (s *Service) OIDCCallback(c *gin.Context) {
 		return
 	}
 	username := ""
+	accountID := ""
 	for _, binding := range settings.OIDC.Bindings {
 		if binding.Subject == idToken.Subject {
 			username = binding.Username
+			accountID = binding.AccountID
 			break
 		}
 	}
 	// Authenticate above before looking up an account. Unlinked realm users get
 	// no device access, even when their preferred_username is "admin".
 	user, err := authn.DefaultStore.Get(username)
-	if err != nil || !user.Enabled {
+	if err != nil || !user.Enabled || accountID == "" || user.ID != accountID {
 		s.oidcFailure(c)
 		return
 	}

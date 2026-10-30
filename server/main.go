@@ -71,6 +71,9 @@ func run() {
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	if err := r.SetTrustedProxies(conf.TrustedProxies); err != nil {
+		log.Fatalf("invalid trustedProxies configuration: %v", err)
+	}
 	r.Use(gin.Recovery())
 	if conf.Authentication == "disable" {
 		r.Use(cors.AllowAll())

@@ -120,14 +120,18 @@ func watchTokenState(ctx context.Context, cancel context.CancelFunc, token *Toke
 }
 
 func validateSession(token *Token) (*authn.User, error) {
-	settings, err := authn.DefaultSettings.Get()
+	settings, err := authn.CurrentSettings()
 	if err != nil {
 		return nil, err
 	}
-	if !settings.AllowsSession(token.AuthMethod, token.AuthRevision, token.OIDCSubject, token.Username) {
+	user, err := authn.DefaultStore.ValidateToken(token.Username, token.TokenVersion)
+	if err != nil {
+		return nil, err
+	}
+	if !settings.AllowsSession(token.AuthMethod, token.AuthRevision, token.OIDCSubject, token.Username, user.ID) {
 		return nil, errors.New("login method disabled or authentication settings changed")
 	}
-	return authn.DefaultStore.ValidateToken(token.Username, token.TokenVersion)
+	return user, nil
 }
 
 func RequireRole(roles ...authn.Role) gin.HandlerFunc {
@@ -255,7 +259,7 @@ func abortForbidden(c *gin.Context) {
 }
 
 func GenerateJWT(username string, tokenVersion uint64) (string, error) {
-	settings, err := authn.DefaultSettings.Get()
+	settings, err := authn.CurrentSettings()
 	if err != nil {
 		return "", err
 	}

@@ -14,17 +14,21 @@ import (
 
 func (s *Service) LoginMethods(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	settings, err := authn.DefaultSettings.Get()
+	var rsp proto.Response
+	if config.GetInstance().Authentication == "disable" {
+		rsp.OkRspWithData(c, gin.H{"localEnabled": false, "oidcEnabled": false, "oidcDisplayName": "", "authenticationDisabled": true})
+		return
+	}
+	settings, err := authn.CurrentSettings()
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": -1, "msg": "authentication unavailable"})
 		return
 	}
-	var rsp proto.Response
 	rsp.OkRspWithData(c, gin.H{
 		"localEnabled":           settings.LocalEnabled,
 		"oidcEnabled":            settings.OIDC.Enabled,
 		"oidcDisplayName":        settings.OIDC.DisplayName,
-		"authenticationDisabled": config.GetInstance().Authentication == "disable",
+		"authenticationDisabled": false,
 	})
 }
 
@@ -37,7 +41,7 @@ func redactedSettings(settings authn.Settings) gin.H {
 func (s *Service) GetSettings(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	var rsp proto.Response
-	settings, err := authn.DefaultSettings.Get()
+	settings, err := authn.CurrentSettings()
 	if err != nil {
 		rsp.ErrRsp(c, -1, "failed to load authentication settings")
 		return
@@ -65,7 +69,7 @@ func (s *Service) SetSettings(c *gin.Context) {
 		rsp.ErrRsp(c, -1, "invalid authentication settings")
 		return
 	}
-	previous, err := authn.DefaultSettings.Get()
+	previous, err := authn.CurrentSettings()
 	if err != nil {
 		rsp.ErrRsp(c, -1, "failed to load authentication settings")
 		return
@@ -85,28 +89,44 @@ func (s *Service) SetSettings(c *gin.Context) {
 		rsp.ErrRsp(c, -1, "invalid session")
 		return
 	}
-	if next.OIDC.Enabled {
-		hasAdmin := false
-		for _, binding := range next.OIDC.Bindings {
-			user, getErr := authn.DefaultStore.Get(binding.Username)
+	hasAdmin := false
+	for i := range next.OIDC.Bindings {
+		binding := &next.OIDC.Bindings[i]
+		// IDs are server-owned. A round trip must preserve an existing link,
+		// including a stale one, rather than silently attaching a reused name.
+		binding.AccountID = ""
+		for _, old := range previous.OIDC.Bindings {
+			if old.Subject == binding.Subject && old.Username == binding.Username {
+				binding.AccountID = old.AccountID
+				break
+			}
+		}
+		user, getErr := authn.DefaultStore.Get(binding.Username)
+		if binding.AccountID == "" {
 			if getErr != nil {
 				rsp.ErrRsp(c, -1, "OIDC bindings must name existing local accounts")
 				return
 			}
-			if user.Enabled && user.Role == authn.RoleAdmin {
-				hasAdmin = true
-			}
+			binding.AccountID = user.ID
 		}
-		if !next.LocalEnabled && !hasAdmin {
-			rsp.ErrRsp(c, -1, "OIDC-only login requires a linked, enabled administrator")
-			return
+		if getErr == nil && user.ID == binding.AccountID && user.Enabled && user.Role == authn.RoleAdmin {
+			hasAdmin = true
 		}
+	}
+	if !next.LocalEnabled && !hasAdmin {
+		rsp.ErrRsp(c, -1, "OIDC-only login requires a linked, enabled administrator")
+		return
+	}
+	user, err := authn.DefaultStore.Get(principal.Username)
+	if err != nil {
+		rsp.ErrRsp(c, -1, "invalid session")
+		return
 	}
 	// Prove the replacement login works before turning off the fallback. Do not
 	// change the provider and remove the fallback in the same save.
 	sameOIDC := reflect.DeepEqual(previous.OIDC, next.OIDC)
 	if !next.LocalEnabled && (principal.AuthMethod != authn.MethodOIDC || !sameOIDC ||
-		!next.AllowsSession(authn.MethodOIDC, next.Revision, principal.OIDCSubject, principal.Username)) {
+		!next.AllowsSession(authn.MethodOIDC, next.Revision, principal.OIDCSubject, principal.Username, user.ID)) {
 		rsp.ErrRsp(c, -1, "save OIDC settings and sign in as an OIDC administrator before disabling password login")
 		return
 	}
@@ -116,7 +136,7 @@ func (s *Service) SetSettings(c *gin.Context) {
 			return
 		}
 	}
-	saved, err := authn.DefaultSettings.Save(req.Settings, req.ClearClientSecret)
+	saved, err := authn.DefaultSettings.Save(next, req.ClearClientSecret)
 	if err != nil {
 		rsp.ErrRsp(c, -1, err.Error())
 		return
@@ -131,10 +151,10 @@ func (s *Service) SetSettings(c *gin.Context) {
 	if method == "" {
 		method = authn.MethodLocal
 	}
-	if saved.AllowsSession(method, saved.Revision, principal.OIDCSubject, principal.Username) && (method != authn.MethodOIDC || sameOIDC) {
-		user, getErr := authn.DefaultStore.Get(principal.Username)
+	user, getErr := authn.DefaultStore.Get(principal.Username)
+	if getErr == nil && saved.AllowsSession(method, saved.Revision, principal.OIDCSubject, principal.Username, user.ID) && (method != authn.MethodOIDC || sameOIDC) {
 		oldToken := middleware.CurrentToken(c)
-		if getErr == nil && oldToken != nil && oldToken.ExpiresAt != nil {
+		if oldToken != nil && oldToken.ExpiresAt != nil {
 			token, tokenErr := middleware.GenerateSessionJWT(user.Username, user.TokenVersion, method, saved.Revision, principal.OIDCSubject, oldToken.ExpiresAt.Time)
 			if tokenErr == nil {
 				setSessionCookie(c, token)

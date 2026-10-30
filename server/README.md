@@ -29,6 +29,7 @@ The configuration file path is `/etc/kvm/server.yaml`.
 # Network Settings
 proto: http            # Access protocol. Can be changed to `https` only when certificates are configured. Default is `http`
 host: ""               # The listening address for the HTTP/HTTPS service. If left empty, all network interfaces will be bound
+trustedProxies: []      # Optional reverse-proxy IPs/CIDRs allowed to supply client IP headers; restart after changing
 port:
     http: 80           # The listening port for the HTTP service. Default is `80`
     https: 443         # The listening port for the HTTPS service (effective when HTTPS is enabled). Default is `443`
@@ -205,6 +206,17 @@ To configure Keycloak:
    provider or its links while using OIDC only, first re-enable password login,
    save the provider changes, and verify a new OIDC administrator login.
 
+Links are pinned to one lifetime of a device account. Deleting an account and
+creating another with the same username does not transfer its OIDC access. To
+link that identity to the replacement account, remove the old link and save,
+then add it again and save. Password changes, logout, role and permission edits,
+and disabling/re-enabling an existing account preserve its identity link.
+
+When upgrading from the initial experimental OIDC build, username-only links
+are cleared and password login is re-enabled. Sign in with the existing device
+password, recreate the links, and verify an OIDC administrator login before
+disabling password login again. Provider settings and the saved secret remain.
+
 OIDC uses the authorization-code flow with PKCE S256, a browser-bound single-use
 state, and a nonce. ID tokens are verified against the provider's signing keys,
 issuer, audience, and expiry. Provider access/refresh tokens never reach the web
@@ -216,6 +228,17 @@ at the next OIDC login; this implementation does not support back-channel logout
 or continuously introspect Keycloak sessions. Signing out ends the device
 session according to `revokeTokensOnLogout`; it leaves the Keycloak SSO session
 active, so signing in again may not prompt for credentials.
+
+OIDC admission allows eight pending logins and twenty starts per minute per
+client IP. Forwarding headers are ignored by default. Behind a reverse proxy,
+set `trustedProxies` in `/etc/kvm/server.yaml` to that proxy's IP or narrow CIDR
+and restart the server. The proxy must overwrite or correctly append the actual
+client address to `X-Forwarded-For`; untrusted prefixes are ignored. Do not trust
+arbitrary clients or all networks. Without this configuration, clients behind
+the same proxy share one budget. Completed and expired flows release their
+pending slots, and recent-source bookkeeping is bounded. These limits prevent
+one peer from exhausting the shared flow pool; distributed denial of service
+still requires network-level controls.
 
 Saving login settings invalidates previous browser sessions and pending OIDC
 flows. The saving administrator receives a replacement session if their method
@@ -232,8 +255,15 @@ For recovery from an unavailable provider, use an existing authorized SSH/root
 session or physical access to move `/etc/kvm/authentication.json` aside and
 restart NanoKVM. This restores password and MCP-key method defaults without
 changing account passwords; restore the old file to recover the OIDC settings.
-The physical BOOT-button password reset still changes `/etc/kvm/pwd` and the
-system password, but does **not** re-enable a disabled password login method.
+The physical BOOT-button password reset resets the system password and removes
+`/etc/kvm/pwd`. The server detects this, restores the default device account and
+password login, invalidates previous browser sessions, and clears OIDC account
+links. Provider settings and the MCP-key method switch remain as configured.
+This recovery also works with the original support binary after a server-only
+update. Recreate identity links and verify an OIDC administrator login before
+disabling password login again. Invalid or unreadable files fail closed.
+Valid account files from older releases that lack account IDs are migrated with
+password login enabled and links cleared, preserving the existing passwords.
 Do not set `authentication: disable` to recover an internet-accessible device.
 
 ## Compile & Deploy

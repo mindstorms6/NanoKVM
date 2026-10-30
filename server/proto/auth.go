@@ -6,10 +6,11 @@ type LoginReq struct {
 }
 
 type GetAccountRsp struct {
-	Username    string   `json:"username"`
-	Role        string   `json:"role"`
-	Permissions []string `json:"permissions"`
-	AuthMethod  string   `json:"authMethod,omitempty"`
+	Username     string   `json:"username"`
+	Role         string   `json:"role"`
+	Permissions  []string `json:"permissions"`
+	AuthMethod   string   `json:"authMethod,omitempty"`
+	LocalEnabled bool     `json:"localEnabled"`
 }
 
 type ChangePasswordReq struct {

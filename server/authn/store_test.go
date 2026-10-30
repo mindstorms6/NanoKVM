@@ -210,3 +210,71 @@ func TestConcurrentCreatesDoNotLoseUsers(t *testing.T) {
 		t.Fatalf("got %d users, want %d", len(users), count+1)
 	}
 }
+
+func TestAccountIdentitySurvivesUpdatesButNotRecreation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pwd")
+	store := NewStore(path)
+	if err := store.Create("alice", "alice-password", RoleUser); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.Get("alice")
+	if err != nil || before.ID == "" {
+		t.Fatalf("missing account identity: %+v %v", before, err)
+	}
+	if _, err = store.SetPassword("alice", "changed-password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.Revoke("alice"); err != nil {
+		t.Fatal(err)
+	}
+	role := RoleAdmin
+	disabled, enabled := false, true
+	for _, patch := range []UserPatch{{Role: &role}, {Enabled: &disabled}, {Enabled: &enabled}} {
+		if _, _, err = store.Update("admin", "alice", patch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after, err := NewStore(path).Get("alice")
+	if err != nil || after.ID != before.ID || after.TokenVersion == before.TokenVersion {
+		t.Fatalf("account identity changed on update/restart: %+v %v", after, err)
+	}
+	if err = store.Delete("admin", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Create("alice", "replacement-password", RoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := store.Get("alice")
+	if err != nil || replacement.ID == "" || replacement.ID == before.ID {
+		t.Fatalf("recreated account reused identity: %+v %v", replacement, err)
+	}
+}
+
+func TestAccountIdentityMigrationIsPersistedOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pwd")
+	store := NewStore(path)
+	if err := store.Initialize(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var db database
+	if err = json.Unmarshal(data, &db); err != nil {
+		t.Fatal(err)
+	}
+	db.Users[0].ID = ""
+	data, _ = json.Marshal(db)
+	if err = os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.Get("admin")
+	if err != nil || user.ID == "" {
+		t.Fatalf("migration: %+v %v", user, err)
+	}
+	again, err := NewStore(path).Get("admin")
+	if err != nil || again.ID != user.ID {
+		t.Fatalf("identity was not persisted: %+v %v", again, err)
+	}
+}

@@ -28,7 +28,7 @@ const en = {
         'Create an OpenID Connect client with Standard flow enabled and PKCE S256. For a confidential client, enable client authentication and enter its secret. Use the realm URL as the issuer. HTTPS is required except on loopback.',
       bindings: 'Linked identities',
       bindingsHelp:
-        'Create device accounts above, then link each Keycloak user ID (the sub claim) to an account. Only linked identities can sign in; their device account controls roles and permissions. Usernames and email addresses are never matched automatically.',
+        'Create device accounts above, then link each Keycloak user ID (the sub claim) to an account. Only linked identities can sign in; their device account controls roles and permissions. Deleting and recreating an account breaks its links. To relink, remove the old link and save before adding it again. Usernames and email addresses are never matched automatically.',
       subject: 'Keycloak user ID / OIDC subject',
       account: 'Device account',
       addBinding: 'Link an identity',

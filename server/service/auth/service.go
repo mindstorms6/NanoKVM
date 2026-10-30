@@ -9,10 +9,11 @@ import (
 type Service struct {
 	mutex          sync.Mutex
 	flows          map[string]oidcFlow
+	flowStarts     map[string]oidcStartWindow
 	provider       *oidc.Provider
 	providerIssuer string
 }
 
 func NewService() *Service {
-	return &Service{flows: make(map[string]oidcFlow)}
+	return &Service{flows: make(map[string]oidcFlow), flowStarts: make(map[string]oidcStartWindow)}
 }
